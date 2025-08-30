@@ -8,6 +8,7 @@ from scipy.interpolate import interp1d
 from scipy.signal import convolve
 
 from utils import StochasticVolatilityModel, Density
+from reference_models import ReferenceModel
 
 class SVBassLV:
     """
@@ -56,7 +57,7 @@ class SVBassLV:
         brenier_map: Optional[Callable]
         alpha_qf: Optional[Callable]
 
-    def __init__(self, s0: float, reference_model: StochasticVolatilityModel, market_marginals: dict[float, Density]):
+    def __init__(self, s0: float, reference_model: ReferenceModel, market_marginals: dict[float, Density]):
         """
         Initialize the SVBassLv model.
         
@@ -108,9 +109,9 @@ class SVBassLV:
         
 		# Construct a brenier map for the first marginal
         brenier_map_values = self.data[0].density.qf(
-            x = self.reference_model.cdf(t = T[0], x = grid))
+            x = self.reference_model.cdf(t = T[0], x = grid + self.s0))
         
-        self.data[0].brenier_map = interp1d(grid, brenier_map_values, fill_value = 'extrapolate')
+        self.data[0].brenier_map = interp1d(grid + self.s0, brenier_map_values, fill_value = 'extrapolate')
         print(f'first BM is constructed')
         
         # Iterate over the subsequent marginals to obtain the stretching function on the maturities times
@@ -157,8 +158,8 @@ class SVBassLV:
                 np.clip(self.conv(F, discrete_kernel, 0 , 1), 0, 1)
                 )
 
-            self.data[i].alpha_qf = interp1d(F, grid, fill_value='extrapolate') 
-            self.data[i].brenier_map = interp1d(grid, brenier_map_values, fill_value='extrapolate') 
+            self.data[i].alpha_qf = interp1d(F, grid + self.s0, fill_value='extrapolate') 
+            self.data[i].brenier_map = interp1d(grid + self.s0, brenier_map_values, fill_value='extrapolate') 
 
             print(f'Brenier map for maturity {T[i]} is constructed error = {error}')
 
@@ -233,12 +234,12 @@ class SVBassLV:
         transition_kernel = self.reference_model.kernel(delta_t, grid) * dx
         bound_0 = self.data[int_].density.qf(1e-08)
         bound_1 = self.data[int_].density.qf(1 - 1e-08)
-        f_delta_t_values = self.conv(self.data[int_].brenier_map(grid), transition_kernel, bound_0, bound_1)
+        f_delta_t_values = self.conv(self.data[int_].brenier_map(grid + self.s0), transition_kernel, bound_0, bound_1)
 
         if method == 'direct':
-            return interp1d(grid, f_delta_t_values, fill_value = 'extrapolate')
+            return interp1d(grid + self.s0, f_delta_t_values, fill_value = 'extrapolate')
         if method == 'inverse':
-            return interp1d(f_delta_t_values, grid, fill_value = 'extrapolate')
+            return interp1d(f_delta_t_values, grid + self.s0, fill_value = 'extrapolate')
     
     def simulate_smile(self, n_points, t): 
         """
@@ -263,7 +264,7 @@ class SVBassLV:
         next_T = T[int_]
 
         if int_ == 0: 
-            xi = np.zeros(n_points)
+            xi = np.ones(n_points) * self.s0
         else:
             u = np.random.uniform(size = n_points)
             xi = self.data[int_].alpha_qf(u)
@@ -328,7 +329,7 @@ class SVBassLV:
             if interval > 0:
                 f_i_inverse = self.create_stretching_function(interval, time_interval, 'inverse')
                 start_values = f_i_inverse(final_paths[-1][:,-1])
-                paths = paths + np.reshape(start_values, (n_paths, 1))
+                paths = paths + np.reshape(start_values, (n_paths, 1)) - self.s0
             
             xi_paths.append(paths)
             stretched_paths = np.zeros(shape = paths.shape)
