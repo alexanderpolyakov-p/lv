@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import List
 from math import *
 import numpy as np
 import scipy.stats as st
@@ -26,29 +27,14 @@ def implied_vol(s, t, k, v, theta=1):
     except:
         return nan
 
-class StochasticVolatilityModel: #can be Brownian motion.
-    
-    def __init__(self, s0: float):
-        self.s0 = s0
-    
-    def kernel(self, delta_t: float, x: np.array):
-        return st.norm.pdf(x, loc = 0, scale=np.sqrt(delta_t))
-
-    def cdf(self, t: float, x: np.array): 
-       return st.norm.cdf(x, loc = 0, scale=np.sqrt(t))
-
-    def qf(self, t: float, x: np.array): 
-        return st.norm.ppf(x, loc = 0, scale=np.sqrt(t))
-    
-    def simulate(self, n_paths: int, T: float, n_steps: int):
-        dt = T / n_steps
-        increments = np.random.normal(0, np.sqrt(dt), (n_paths, n_steps))
-        paths = np.zeros((n_paths, n_steps + 1))
-        paths[:, 0] = 0
-        paths[:, 1:] = np.cumsum(increments, axis=1)
-        return paths
-    
 @dataclass
 class Density:
 	cdf: callable 
 	qf: callable
+
+@dataclass 
+class CalibrationResult:
+    final_marginal: float  # the maturity when interval finishes
+    error_evolution: List[float]  # Error at each iteration
+    iterations: int
+    final_error: float

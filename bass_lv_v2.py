@@ -7,7 +7,7 @@ import scipy.stats as st
 from scipy.interpolate import interp1d
 from scipy.signal import convolve
 
-from utils import StochasticVolatilityModel, Density
+from utils import Density, CalibrationResult
 from reference_models import ReferenceModel
 
 class SVBassLV:
@@ -76,7 +76,6 @@ class SVBassLV:
                 alpha_qf=None
             ) for time, density in market_marginals.items()]
 
-
         self.grid = None
 
     def test_cenvex_order(self):
@@ -88,7 +87,7 @@ class SVBassLV:
         """
         pass
 
-    def calibrate(self, initial_guess = Density, tolerance = 1e-5, max_iter = 100, N = 30_000, nsigma = 6) -> list:
+    def calibrate(self, initial_guess = Density, tolerance = 1e-5, max_iter = 100, N = 30_000, nsigma = 6) -> List[CalibrationResult]:
         """
         This method iteratively solves fixed-point
         equations to find the disctribution functions of the Bass measures for each interval
@@ -99,6 +98,9 @@ class SVBassLV:
             max_iter (int, optional): Maximum number of iterations of operator A. Defaults to 100.
             N (int, optional): Number of grid points. Defaults to 30_000.
             nsigma (int, optional): Number of standard deviations for grid bounds. Defaults to 6.
+            
+        Returns:
+            List[CalibrationResult]: List of calibration results for each interval
         """
         #extracting list of maturities
         T = np.array([d.t for d in self.data], dtype = float)  #array of maturities
@@ -107,12 +109,21 @@ class SVBassLV:
         self.grid = grid
         dx = grid[1] - grid[0]
         
+        calibration_results = []
+        
 		# Construct a brenier map for the first marginal
         brenier_map_values = self.data[0].density.qf(
             x = self.reference_model.cdf(t = T[0], x = grid + self.s0))
         
         self.data[0].brenier_map = interp1d(grid + self.s0, brenier_map_values, fill_value = 'extrapolate')
-        print(f'first BM is constructed')
+        
+        # First marginal has no iterations, so create result with no error evolution
+        calibration_results.append(CalibrationResult(
+            final_marginal=T[0],
+            error_evolution=[0.0],
+            iterations=0,
+            final_error=0.0
+        ))
         
         # Iterate over the subsequent marginals to obtain the stretching function on the maturities times
         for i in range(1, len(T)): 
@@ -122,13 +133,10 @@ class SVBassLV:
 			# Create a discrete convolution kernel
             time_delta = T[i] - T[i - 1]
             discrete_kernel = self.reference_model.kernel(time_delta, grid) * dx
-            print(f'next interval with delta: {time_delta}')
 
             #define bounds for convolution
             bound_0 = marginal_2_qf(1e-08)
             bound_1 = marginal_2_qf(1 - 1e-08)
-
-            print(f'bounds are: {bound_0, bound_1}')
             
             def A_operator(F):
                 convolved_F = self.conv(F, discrete_kernel, 0, 1)
@@ -142,14 +150,16 @@ class SVBassLV:
             F1 = A_operator(F)
 
             error = np.max(np.abs(F - F1))
+            error_evolution = [error]  # Track error evolution
 
             #keep iterations until the tolerance level:
             for _ in range(max_iter-1):
                 if (error > tolerance): 
-                    print(f'iter: {_}, error: {error}')
+                    #print(f'iter: {_}, error: {error}')
                     F = F1 
                     F1 = A_operator(F)
                     error = np.max(np.abs(F - F1))
+                    error_evolution.append(error)
                 else:
                     break
         
@@ -161,7 +171,17 @@ class SVBassLV:
             self.data[i].alpha_qf = interp1d(F, grid + self.s0, fill_value='extrapolate') 
             self.data[i].brenier_map = interp1d(grid + self.s0, brenier_map_values, fill_value='extrapolate') 
 
-            print(f'Brenier map for maturity {T[i]} is constructed error = {error}')
+            # Store calibration result for this interval
+            calibration_results.append(CalibrationResult(
+                final_marginal=T[i],
+                error_evolution=error_evolution,
+                iterations=len(error_evolution) - 1,
+                final_error=error
+            ))
+            
+            print(f'Interval {i} (T={T[i]}): {len(error_evolution)-1} iterations, final error = {error}')
+        
+        return calibration_results
 
     def conv(self, x: np.ndarray, y: np.ndarray, fill_left: float, fill_right: float) -> np.ndarray:
         """
@@ -259,22 +279,22 @@ class SVBassLV:
             The method automatically determines which interval to use 
             and creates the stretching function specifically for t 
         """
+        s0 = self.reference_model.s0
         T = np.array([d.t for d in self.data], dtype = float) 
         int_ = np.searchsorted(T, t)
         next_T = T[int_]
 
         if int_ == 0: 
-            xi = np.ones(n_points) * self.s0
+            xi = np.ones(n_points) * s0
         else:
             u = np.random.uniform(size = n_points)
             xi = self.data[int_].alpha_qf(u)
 
-        sigma = np.sqrt(t - (T[int_ - 1] if int_ > 0 else 0))
-        dW = np.random.normal(loc = 0, scale = sigma, size = n_points) #simulate paths of the reference model.
-        #paths = self.reference_model.simulate(N_points)
+        time_skip = t - (T[int_ - 1] if int_ > 0 else 0)
+        paths = self.reference_model.simulate(n_points, time_skip, 250)
 
         f = self.create_stretching_function(int_, next_T - t, 'direct')
-        return f(xi + dW)
+        return f(xi + paths[:,-1] - s0)
     
     def distribute_steps(self, n_steps: int, T: list[float]) -> list[int]:
         """
@@ -310,6 +330,7 @@ class SVBassLV:
                 - final_paths: List of stretched asset price paths
                 - xi_paths: List of reference model paths combined with Bass variables xi
         """
+        s0 = self.reference_model.s0
         T = np.array([d.t for d in self.data], dtype = float) 
         n_steps_split = self.distribute_steps(n_steps, T)
         print(f'steps split between maturities = {n_steps_split}')
@@ -329,7 +350,7 @@ class SVBassLV:
             if interval > 0:
                 f_i_inverse = self.create_stretching_function(interval, time_interval, 'inverse')
                 start_values = f_i_inverse(final_paths[-1][:,-1])
-                paths = paths + np.reshape(start_values, (n_paths, 1)) - self.s0
+                paths = paths + np.reshape(start_values, (n_paths, 1)) - s0
             
             xi_paths.append(paths)
             stretched_paths = np.zeros(shape = paths.shape)
