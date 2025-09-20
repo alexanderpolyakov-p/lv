@@ -24,21 +24,6 @@ class SVBassLV:
         reference_model (StochasticVolatilityModel): Reference stochastic volatility model 
         data (List[datastruct]): List of data structures containing marginal information
         grid (Optional[np.ndarray]): Computational grid for discrete convolutions
-    
-    Example:
-        >>> # Initialize with market marginals and reference model
-        >>> sv_bass = SVBassLv(s0=100.0, 
-        ...                     reference_model=ref_model,
-        ...                     market_marginals=market_data)
-        >>> 
-        >>> # Calibrate the model
-        >>> sv_bass.calibrate()
-        >>> 
-        >>> # Simulate paths
-        >>> paths, xi_paths = sv_bass.simulate_paths(n_paths=1000, n_steps=100)
-        >>> 
-        >>> # Generate smile at specific time
-        >>> smile = sv_bass.simulate_smile(n_points=50, t=0.5)
     """
     
     @dataclass
