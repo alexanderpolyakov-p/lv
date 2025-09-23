@@ -24,7 +24,7 @@ class ReferenceModel: #can be Brownian motion.
 
 class BrownianMotion_R(ReferenceModel): 
     
-    def __init__(self, s0: float, sigma: float):
+    def __init__(self, s0: float, sigma: float = 0.2):
         super().__init__(s0)
         self.sigma = sigma
     
@@ -64,7 +64,7 @@ class ArithmeticSABR_R(ReferenceModel):
         dx = grid[1] - grid[0]
 
         pdf = np.diff(bs_call_price(self.s0, 
-                                    self.iv(delta_t, strikes), 
+                                    self.iv(self.s0, self.alpha, self.rho, self.nu, delta_t, strikes), 
                                     delta_t,
                                     strikes), n = 2)
         
@@ -82,7 +82,7 @@ class ArithmeticSABR_R(ReferenceModel):
         dx = strikes[1] - strikes[0]
 
         cdf_values = np.diff(bs_call_price(self.s0,
-                                           self.iv(t, strikes),
+                                           self.iv(self.s0, self.alpha, self.rho, self.nu, t, strikes),
                                            t,
                                            strikes), n = 1)/dx + 1
 
@@ -95,7 +95,7 @@ class ArithmeticSABR_R(ReferenceModel):
         dx = grid[1] - grid[0]
 
         cdf_values = np.diff(bs_call_price(self.s0,
-                                           self.iv(t, strikes),
+                                           self.iv(self.s0, self.alpha, self.rho, self.nu, t, strikes),
                                            t,
                                            strikes), n = 1)/dx + 1
 
@@ -125,16 +125,44 @@ class ArithmeticSABR_R(ReferenceModel):
 
     #model methods 
     def call_price(self, t, k):
-        return (bs_call_price(s=self.s0, sigma=self.iv(t, k), t=t, k=k))
+        return (bs_call_price(s=self.s0, sigma=self.implied_vol(t, k), t=t, k=k))
 
-    def iv(self, t, k):
-        z = self.nu/self.alpha * np.sqrt(self.s0*k) * np.log(self.s0/k)
-        x = np.log((np.sqrt(1-2*self.rho*z + z*z) + z - self.rho) /
-                    (1-self.rho))
+    @staticmethod
+    def iv(s0, alpha, rho, nu, t, k):
+        z = nu/alpha * np.sqrt(s0*k) * np.log(s0/k)
+        x = np.log((np.sqrt(1-2*rho*z + z*z) + z - rho) /
+                    (1-rho))
         return (
-            self.alpha *
-
+            alpha *
             # when f = k, we must have log(f/k)/(f-k) = k, z/x = 1
             # and we get the following formula
-            np.divide(np.log(self.s0 / k)*z, (self.s0 - k)*x, where = np.abs(self.s0 - k) > 1e-12, out=np.array(k, dtype = float)) 
-                        * (1 + t * (self.alpha**2 / (24 * self.s0 * k) + (2- 3 * self.rho**2) / 24 * self.nu**2)))
+            np.divide(np.log(s0 / k)*z, (s0 - k)*x, where = np.abs(s0 - k) > 1e-12, out=np.array(k, dtype = float)) 
+                        * (1 + t * (alpha**2 / (24 * s0 * k) + (2- 3 * rho**2) / 24 * nu**2)))
+    
+    def implied_vol(self, t, k):
+        """Instance method wrapper for backward compatibility"""
+        return self.iv(self.s0, self.alpha, self.rho, self.nu, t, k)
+
+    @classmethod
+    def calibrate(cls, s0, t, k, iv, bounds = [(0.01, 100.0), (-0.99, 0.99), (0.01, 30.0)]):
+
+        from scipy.optimize import differential_evolution
+        
+        t, k, iv = np.atleast_1d(t), np.atleast_1d(k), np.atleast_1d(iv)
+        if len(t) == 1:
+            t = np.full_like(k, t[0])
+        
+        def objective(params):
+            alpha, rho, nu = params
+            if alpha <= 0 or nu <= 0 or abs(rho) >= 1:
+                return 1e6
+            try:
+                iv_model = cls.iv(s0, alpha, rho, nu, t, k)
+                return np.mean((iv_model - iv)**2)
+            except:
+                return 1e6
+        
+        
+        res = differential_evolution(objective, bounds, seed=42)
+        
+        return cls(s0, *res.x)

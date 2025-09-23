@@ -28,29 +28,14 @@ class SVBassLV:
     
     @dataclass
     class datastruct:
-        """
-        Data structure for storing marginal information at each maturity.
-        
-        Attributes:
-            t (float): Maturity time
-            density (Callable): Density function for the marginal distribution
-            brenier_map (Optional[Callable]): Brenier map function for optimal transport
-            alpha_qf (Optional[Callable]): Alpha quantile function for path simulation
-        """
+
         t: float
         density: Callable
         brenier_map: Optional[Callable]
         alpha_qf: Optional[Callable]
 
     def __init__(self, s0: float, reference_model: ReferenceModel, market_marginals: dict[float, Density]):
-        """
-        Initialize the SVBassLv model.
-        
-        Args:
-            s0 (float): Initial asset price
-            reference_model (StochasticVolatilityModel): Reference stochastic volatility model
-            market_marginals (dict[float, Density]): Dictionary mapping maturity times to density functions
-        """
+       
         self.s0 = s0
         self.reference_model = reference_model 
 
@@ -64,26 +49,19 @@ class SVBassLV:
         self.grid = None
 
     def test_cenvex_order(self):
-        """
-        Test convex ordering of marginals (placeholder method).
-        
-        This method is intended to verify that the marginal distributions
-        satisfy the necessary convex ordering conditions for the model.
-        """
+    
         pass
 
     def calibrate(self, initial_guess = Density, tolerance = 1e-5, max_iter = 100, N = 30_000, nsigma = 6) -> List[CalibrationResult]:
         """
-        This method iteratively solves fixed-point
-        equations to find the disctribution functions of the Bass measures for each interval
-        
+    
         Args:
-            initial_guess (Density, optional): Initial guess for the density function. Defaults to Density.
-            tolerance (float, optional): Convergence tolerance for fixed-point iterations. Defaults to 1e-5.
-            max_iter (int, optional): Maximum number of iterations of operator A. Defaults to 100.
-            N (int, optional): Number of grid points. Defaults to 30_000.
-            nsigma (int, optional): Number of standard deviations for grid bounds. Defaults to 6.
-            
+            initial_guess (Density, optional)
+            tolerance (float, optional)
+            max_iter (int, optional)
+            N (int, optional)
+            nsigma (int, optional)
+            ƒƒы÷÷ в
         Returns:
             List[CalibrationResult]: List of calibration results for each interval
         """
@@ -185,12 +163,6 @@ class SVBassLV:
         Returns:
             np.ndarray: Result of the convolution
             
-        Raises:
-            AssertionError: If x and y have different lengths
-            
-        Note:
-            The method automatically detects numerical issues and switches to direct
-            convolution when FFT-based methods produce NaN values.
         """
         assert (len(x) == len(y)) # x and y must have the same length
 
@@ -225,10 +197,6 @@ class SVBassLV:
         
         Returns:
             Callable: Interpolated stretching function
-            
-        Note:
-            If delta_t is 0, returns the Brenier map directly Otherwise, applies
-            the transition kernel  to calculate E( f(X_T) | X_t )
         """
         if delta_t == 0:
             return self.data[int_].brenier_map
@@ -259,10 +227,6 @@ class SVBassLV:
         
         Returns:
             np.ndarray: Simulated asset prices for time t
-            
-        Note:
-            The method automatically determines which interval to use 
-            and creates the stretching function specifically for t 
         """
         s0 = self.reference_model.s0
         T = np.array([d.t for d in self.data], dtype = float) 
@@ -276,7 +240,7 @@ class SVBassLV:
             xi = self.data[int_].alpha_qf(u)
 
         time_skip = t - (T[int_ - 1] if int_ > 0 else 0)
-        paths = self.reference_model.simulate(n_points, time_skip, 250)
+        paths = self.reference_model.simulate(n_points, time_skip, 600)
 
         f = self.create_stretching_function(int_, next_T - t, 'direct')
         return f(xi + paths[:,-1] - s0)
